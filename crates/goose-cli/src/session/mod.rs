@@ -531,7 +531,7 @@ impl CliSession {
             if matches!(input, InputResult::Exit) {
                 break;
             }
-            self.handle_input(input, &history_manager, &mut editor)
+            self.handle_input(input, &history_manager, &mut editor, &conversation_strings)
                 .await?;
         }
 
@@ -568,6 +568,7 @@ impl CliSession {
         input: InputResult,
         history: &HistoryManager,
         editor: &mut rustyline::Editor<GooseCompleter, rustyline::history::DefaultHistory>,
+        conversation_messages: &[String],
     ) -> Result<()> {
         match input {
             InputResult::Message(content) => {
@@ -634,6 +635,35 @@ impl CliSession {
             InputResult::Compact => {
                 history.save(editor);
                 self.handle_compact().await?;
+            }
+            InputResult::Edit(prefill) => {
+                history.save(editor);
+                match crate::session::editor::resolve_editor_command() {
+                    Some(editor_cmd) => {
+                        let messages: Vec<&str> =
+                            conversation_messages.iter().map(|s| s.as_str()).collect();
+                        match crate::session::editor::get_editor_input(
+                            &editor_cmd,
+                            &messages,
+                            prefill.as_deref(),
+                        ) {
+                            Ok((message, true)) => {
+                                self.handle_message_input(&message, history, editor).await?;
+                            }
+                            Ok((_, false)) => {}
+                            Err(e) => {
+                                output::render_error(&format!("Failed to open editor: {}", e));
+                            }
+                        }
+                    }
+                    None => {
+                        output::render_error(
+                            "No editor found. Set one with:\n  \
+                                 goose configure set goose_prompt_editor \"vim\"\n  \
+                                 or set $VISUAL or $EDITOR in your shell.",
+                        );
+                    }
+                }
             }
         }
         Ok(())
